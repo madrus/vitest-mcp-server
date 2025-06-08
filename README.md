@@ -31,18 +31,104 @@ vitest-mcp-server
 
 ### Integration with AI Assistants
 
-Configure your AI assistant (like Claude, Cursor, etc.) to use this MCP server:
+Configure your AI assistant (like Claude Desktop, Cursor, etc.) to use this MCP server.
+
+#### Basic Configuration
+
+Add this to your MCP configuration file:
 
 ```json
 {
   "mcpServers": {
-    "vitest": {
+    "vitest-runner": {
       "command": "npx",
-      "args": ["@madrus/vitest-mcp-server"]
+      "args": [
+        "-y",
+        "@madrus/vitest-mcp-server@latest"
+      ]
     }
   }
 }
 ```
+
+#### Recommended Configuration with Project Directory
+
+For optimal performance and reliability, specify your project directory:
+
+```json
+{
+  "mcpServers": {
+    "vitest-runner": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@madrus/vitest-mcp-server@latest"
+      ],
+      "cwd": "/Users/<your-username>/path/to/your/project/root",
+      "env": {
+        "VITEST_PROJECT_DIR": "/Users/<your-username>/path/to/your/project/root"
+      }
+    }
+  }
+}
+```
+
+#### Configuration Locations
+
+**Cursor (macOS/Linux):**
+- File: `~/.cursor/mcp.json`
+- Full path: `/Users/<your-username>/.cursor/mcp.json`
+
+**Claude Desktop (macOS):**
+- File: `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+**Claude Desktop (Windows):**
+- File: `%APPDATA%\Claude\claude_desktop_config.json`
+
+#### Example Complete Configuration
+
+Here's a complete example for Cursor with multiple MCP servers:
+
+```json
+{
+  "mcpServers": {
+    "vitest-runner": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@madrus/vitest-mcp-server@latest"
+      ],
+      "cwd": "/Users/<your-username>/path/to/your/project/root",
+      "env": {
+        "VITEST_PROJECT_DIR": "/Users/<your-username>/path/to/your/project/root"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ]
+    }
+  }
+}
+```
+
+#### Important Setup Notes
+
+1. **Replace placeholders**: Change `/Users/<your-username>/path/to/your/project/root` to your actual project path
+2. **Project root**: The path should point to your project's root directory (where `package.json` and Vitest config files are located)
+3. **Restart required**: After updating your MCP configuration, restart your AI assistant (Cursor, Claude Desktop, etc.)
+4. **Verify setup**: Use the `ping` tool to verify the server is working correctly
+
+#### Troubleshooting MCP Configuration
+
+If the server fails to start or times out:
+
+1. **Check your project path**: Ensure the paths in `cwd` and `VITEST_PROJECT_DIR` are correct and absolute
+2. **Verify Vitest setup**: Make sure your project has Vitest installed and a valid config file
+3. **Test manually**: Try running `npx vitest run` in your project directory
+4. **Check logs**: Look for error messages in your AI assistant's console/logs
 
 ### Programmatic Usage
 
