@@ -239,10 +239,19 @@ export function registerRunVitestCoverageTool(server: McpServer): void {
           debugLog('Current working directory', process.cwd())
 
           // Run vitest with coverage as child process to get JSON output
+          // Use separate JSON output file to avoid stdout contamination with coverage info
+          const jsonOutputPath = join(projectDir, 'vitest-results.json')
           const vitestOutput = await new Promise<string>((resolve, reject) => {
             const vitestProcess = spawn(
               'npx',
-              ['vitest', '--run', '--reporter=json', '--coverage'],
+              [
+                'vitest',
+                '--run',
+                '--reporter=json',
+                '--outputFile',
+                jsonOutputPath,
+                '--coverage',
+              ],
               {
                 cwd: projectDir,
                 stdio: ['ignore', 'pipe', 'pipe'],
@@ -258,31 +267,10 @@ export function registerRunVitestCoverageTool(server: McpServer): void {
 
             let stdout = ''
             let stderr = ''
-            let outputComplete = false
 
             vitestProcess.stdout.on('data', (data: any) => {
               stdout += data.toString()
               debugLog('Vitest stdout chunk received', data.toString().length)
-
-              // Check if JSON output is complete
-              // Look for key indicators: testResults field and proper JSON ending
-              const hasTestResults = stdout.includes('"testResults":[')
-              const hasProperEnding = stdout.trim().endsWith(']}')
-              const hasValidStructure =
-                stdout.includes('"numTotalTests":') &&
-                stdout.includes('"numPassedTests":')
-
-              // Only consider it complete if we have substantial output and proper structure
-              if (
-                hasTestResults &&
-                hasProperEnding &&
-                hasValidStructure &&
-                !outputComplete
-              ) {
-                outputComplete = true
-                debugLog('Complete JSON output detected, resolving')
-                resolve(stdout)
-              }
             })
 
             vitestProcess.stderr.on('data', (data: any) => {
@@ -292,15 +280,25 @@ export function registerRunVitestCoverageTool(server: McpServer): void {
 
             vitestProcess.on('close', (code: any) => {
               debugLog('Vitest process closed', { code, stdoutLength: stdout.length })
-              if (!outputComplete) {
-                if (code === 0 && stdout.trim()) {
-                  debugLog('Process completed successfully, using final output')
-                  resolve(stdout)
-                } else {
-                  const errorMsg = `Vitest coverage process failed with code ${code}. Stderr: ${stderr}`
-                  debugLog('Process failed', errorMsg)
-                  reject(new Error(errorMsg))
+              if (code === 0) {
+                try {
+                  // Read the JSON output file
+                  if (existsSync(jsonOutputPath)) {
+                    const jsonContent = readFileSync(jsonOutputPath, 'utf-8')
+                    debugLog('Process completed successfully, reading JSON file')
+                    resolve(jsonContent)
+                  } else {
+                    debugLog('JSON output file not found')
+                    reject(new Error('Vitest JSON output file not found'))
+                  }
+                } catch (error) {
+                  debugLog('Error reading JSON file', error)
+                  reject(new Error(`Failed to read vitest output file: ${error}`))
                 }
+              } else {
+                const errorMsg = `Vitest coverage process failed with code ${code}. Stderr: ${stderr}`
+                debugLog('Process failed', errorMsg)
+                reject(new Error(errorMsg))
               }
             })
 
@@ -311,18 +309,16 @@ export function registerRunVitestCoverageTool(server: McpServer): void {
 
             // Fallback timeout - allow more time for coverage
             setTimeout(() => {
-              if (!outputComplete) {
-                debugLog('Vitest timeout reached', {
-                  stdoutLength: stdout.length,
-                  stderrLength: stderr.length,
-                })
-                vitestProcess.kill()
-                reject(
-                  new Error(
-                    `Vitest coverage execution timeout after 60 seconds. Debug: projectDir=${projectDir}, cwd=${process.cwd()}, env.VITEST_PROJECT_DIR=${process.env.VITEST_PROJECT_DIR}, stdout.length=${stdout.length}, stderr.length=${stderr.length}`
-                  )
+              debugLog('Vitest timeout reached', {
+                stdoutLength: stdout.length,
+                stderrLength: stderr.length,
+              })
+              vitestProcess.kill()
+              reject(
+                new Error(
+                  `Vitest coverage execution timeout after 60 seconds. Debug: projectDir=${projectDir}, cwd=${process.cwd()}, env.VITEST_PROJECT_DIR=${process.env.VITEST_PROJECT_DIR}, stdout.length=${stdout.length}, stderr.length=${stderr.length}`
                 )
-              }
+              )
             }, 60000) // Increased timeout for coverage
           })
 
@@ -510,6 +506,17 @@ export function registerRunVitestCoverageTool(server: McpServer): void {
             ],
           }
         } finally {
+          // Cleanup temporary JSON file
+          try {
+            const jsonOutputPath = join(projectDir, 'vitest-results.json')
+            if (existsSync(jsonOutputPath)) {
+              require('fs').unlinkSync(jsonOutputPath)
+              debugLog('Cleaned up temporary JSON file')
+            }
+          } catch (error) {
+            debugLog('Error cleaning up JSON file', error)
+          }
+
           // Always restore original working directory
           process.chdir(originalCwd)
         }
