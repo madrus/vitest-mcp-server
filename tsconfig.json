@@ -19,7 +19,22 @@
     "allowSyntheticDefaultImports": true,
     "types": [
       "node"
-    ]
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "src/*"
+      ],
+      "@/tools/*": [
+        "src/tools/*"
+      ],
+      "@/utils/*": [
+        "src/utils/*"
+      ],
+      "@/utils/test-helpers": [
+        "src/utils/test-helpers"
+      ]
+    }
   },
   "include": [
     "src/**/*"
