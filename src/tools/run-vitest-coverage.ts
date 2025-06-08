@@ -220,27 +220,40 @@ export function registerRunVitestCoverageTool(server: McpServer): void {
         debugInfo.push(`Process cwd AFTER chdir: ${process.cwd()}`)
 
         try {
+          console.log(`[DEBUG] Starting Vitest coverage in directory: ${projectDir}`)
+          console.log(`[DEBUG] Current working directory: ${process.cwd()}`)
+
           // Start Vitest programmatically with coverage enabled
-          const vitest = await startVitest(
-            'test',
-            [],
-            {
-              // CLI options
-              watch: false,
-              run: true,
-              coverage: {
-                enabled: true,
-                reporter: ['json', 'json-summary'],
+          const vitest = (await Promise.race([
+            startVitest(
+              'test',
+              [],
+              {
+                // CLI options
+                watch: false,
+                run: true,
+                coverage: {
+                  enabled: true,
+                  reporter: ['json', 'json-summary'],
+                },
+                reporters: ['json'],
+                outputFile: undefined, // we'll read from state
               },
-              reporters: ['json'],
-              outputFile: undefined, // we'll read from state
-            },
-            {
-              // Minimal vite config - let vitest.config.ts handle everything
-              root: projectDir,
-              logLevel: 'silent', // Prevent logs from interfering with MCP protocol
-            }
-          )
+              {
+                // Minimal vite config - let vitest.config.ts handle everything
+                root: projectDir,
+                logLevel: 'silent', // Prevent logs from interfering with MCP protocol
+              }
+            ),
+            // Add timeout to prevent hanging
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () =>
+                  reject(new Error('Vitest coverage startup timeout after 30 seconds')),
+                30000
+              )
+            ),
+          ])) as any
 
           if (!vitest) {
             return {
@@ -252,6 +265,13 @@ export function registerRunVitestCoverageTool(server: McpServer): void {
               ],
             }
           }
+
+          console.log(`[DEBUG] Vitest coverage started successfully`)
+
+          // Wait for tests to complete by using the proper vitest method
+          console.log(`[DEBUG] Waiting for coverage tests to complete...`)
+          ;(await vitest.runningPromise) || Promise.resolve()
+          console.log(`[DEBUG] Coverage tests completed successfully`)
 
           // Get test results from vitest state
           const testFiles = vitest.state.getFiles()

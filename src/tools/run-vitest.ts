@@ -2,10 +2,25 @@
 /* eslint-disable id-blacklist */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
-import { startVitest } from 'vitest/node'
-
+import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { dirname, resolve } from 'path'
+
+// Debug logging function that writes to file to avoid MCP protocol interference
+function debugLog(message: string, data?: any) {
+  if (process.env.DEBUG_MCP !== 'true') return
+
+  const timestamp = new Date().toISOString()
+  const logMessage = data
+    ? `[RUN-VITEST ${timestamp}] ${message}: ${JSON.stringify(data, null, 2)}\n`
+    : `[RUN-VITEST ${timestamp}] ${message}\n`
+
+  try {
+    require('fs').appendFileSync('/tmp/vitest-mcp-debug.log', logMessage)
+  } catch (error) {
+    // Silently fail if we can't write to log file
+  }
+}
 
 /**
  * Auto-detect the project directory by looking for vitest.config.ts
@@ -57,6 +72,42 @@ export function registerRunVitestTool(server: McpServer): void {
       additionalProperties: false,
     },
     async args => {
+      debugLog('========== RUN-VITEST TOOL CALLED ==========')
+      debugLog('Arguments received', args)
+      debugLog('Process CWD', process.cwd())
+      debugLog('VITEST_PROJECT_DIR env', process.env.VITEST_PROJECT_DIR || 'UNDEFINED')
+
+      // Temporary debug mode - return early with debug info
+      const isDebugMode =
+        args &&
+        typeof args === 'object' &&
+        'random_string' in args &&
+        args.random_string === 'debug'
+      if (isDebugMode) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `DEBUG INFO - EARLY RETURN:
+Process CWD: ${process.cwd()}
+VITEST_PROJECT_DIR: ${process.env.VITEST_PROJECT_DIR || 'UNDEFINED'}
+Arguments: ${JSON.stringify(args)}
+Node version: ${process.version}
+Args type: ${typeof args}
+random_string value: ${args.random_string}
+All environment vars containing VITEST: ${JSON.stringify(
+                Object.keys(process.env)
+                  .filter(k => k.includes('VITEST'))
+                  .reduce((acc: Record<string, string>, k) => {
+                    acc[k] = process.env[k] || ''
+                    return acc
+                  }, {})
+              )}`,
+            },
+          ],
+        }
+      }
+
       try {
         // Determine the project directory with multiple fallback strategies
         let projectDir: string | null = null
@@ -101,105 +152,114 @@ export function registerRunVitestTool(server: McpServer): void {
         process.chdir(projectDir)
 
         try {
-          // Start Vitest programmatically using the Node.js API
-          // Use minimal overrides to let vitest.config.ts do the work
-          const vitest = await startVitest(
-            'test', // mode
-            [], // files - empty means all files
-            {
-              // CLI options only
-              watch: false,
-              run: true,
-              reporters: ['json'],
-            },
-            {
-              // Minimal vite config - let vitest.config.ts handle everything
-              root: projectDir,
-              logLevel: 'silent',
-            }
-          )
+          debugLog('Starting Vitest in directory', projectDir)
+          debugLog('Current working directory', process.cwd())
 
-          if (!vitest) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: `Failed to start Vitest in directory: ${projectDir}. Please ensure vitest.config.ts exists and is properly configured.`,
+          // Run vitest as child process to get JSON output
+          const vitestOutput = await new Promise<string>((resolve, reject) => {
+            const vitestProcess = spawn(
+              'npx',
+              ['vitest', '--run', '--reporter=json', '--no-coverage', '--pool=threads'],
+              {
+                cwd: projectDir,
+                stdio: ['ignore', 'pipe', 'pipe'],
+                env: {
+                  ...process.env,
+                  NODE_ENV: 'test',
+                  // Disable slower features for speed
+                  CI: 'true', // Often makes vitest faster
+                  VITEST_SEGFAULT_RETRY: '0', // Disable retry mechanisms
                 },
-              ],
-            }
-          }
-
-          // Get test results from vitest state
-          const testFiles = vitest.state.getFiles()
-
-          // Helper function to determine if a file passed
-          const isFilePassed = (file: any) => {
-            // A file passes if all its tests pass (no failed tests)
-            const allTasks = file.tasks || []
-            if (allTasks.length === 0) return false
-            return allTasks.every((task: any) => task.result?.state === 'pass')
-          }
-
-          // Helper function to get all test tasks recursively (including nested suites)
-          const getAllTasks = (items: any[]): any[] => {
-            const tasks: any[] = []
-            for (const item of items) {
-              if (item.type === 'test') {
-                tasks.push(item)
-              } else if (item.type === 'suite' && item.tasks) {
-                tasks.push(...getAllTasks(item.tasks))
               }
-            }
-            return tasks
-          }
+            )
 
-          // Create a summary object similar to JSON reporter output
-          const results = {
-            numTotalTestSuites: testFiles.length,
-            numPassedTestSuites: testFiles.filter(isFilePassed).length,
-            numFailedTestSuites: testFiles.filter(f => !isFilePassed(f)).length,
-            numTotalTests: testFiles.reduce(
-              (sum, f) => sum + getAllTasks(f.tasks || []).length,
-              0
-            ),
-            numPassedTests: 0,
-            numFailedTests: 0,
-            testResults: testFiles.map(file => {
-              const allTasks = getAllTasks(file.tasks || [])
-              const passedTasks = allTasks.filter(t => t.result?.state === 'pass')
-              const failedTasks = allTasks.filter(t => t.result?.state === 'fail')
+            let stdout = ''
+            let stderr = ''
+            let outputComplete = false
 
-              return {
-                name: file.filepath,
-                status: isFilePassed(file) ? 'passed' : 'failed',
-                duration: file.result?.duration || 0,
-                assertionResults: allTasks.map(task => ({
-                  ancestorTitles: task.suite ? [task.suite.name] : [],
-                  title: task.name,
-                  status: task.result?.state === 'pass' ? 'passed' : 'failed',
-                  duration: task.result?.duration || 0,
-                  failureMessages:
-                    task.result?.errors?.map((e: any) => e.message) || [],
-                })),
+            vitestProcess.stdout.on('data', data => {
+              stdout += data.toString()
+
+              // Check if JSON output is complete
+              // Look for key indicators: testResults field and proper JSON ending
+              const hasTestResults = stdout.includes('"testResults":[')
+              const hasProperEnding = stdout.trim().endsWith(']}')
+              const hasValidStructure =
+                stdout.includes('"numTotalTests":') &&
+                stdout.includes('"numPassedTests":')
+
+              // Only consider it complete if we have substantial output and proper structure
+              if (
+                hasTestResults &&
+                hasProperEnding &&
+                hasValidStructure &&
+                stdout.length > 500
+              ) {
+                debugLog('Vitest JSON output complete, terminating process', {
+                  length: stdout.length,
+                })
+                if (!outputComplete) {
+                  outputComplete = true
+                  clearTimeout(timeout)
+                  vitestProcess.kill('SIGTERM')
+                  setTimeout(() => {
+                    resolve(stdout)
+                  }, 50) // Minimal delay for clean termination
+                }
               }
-            }),
+            })
+
+            vitestProcess.stderr.on('data', data => {
+              stderr += data.toString()
+              debugLog('vitest stderr', data.toString())
+            })
+
+            // Shorter timeout since we'll kill process once output is complete
+            const timeout = setTimeout(() => {
+              debugLog('Killing vitest process after 15 second timeout')
+              vitestProcess.kill('SIGKILL')
+              if (!outputComplete) {
+                reject(
+                  new Error(
+                    `Vitest execution timeout after 15 seconds. Debug: projectDir=${projectDir}, cwd=${process.cwd()}, env.VITEST_PROJECT_DIR=${process.env.VITEST_PROJECT_DIR}, stdout.length=${stdout.length}, stderr.length=${stderr.length}`
+                  )
+                )
+              }
+            }, 15000)
+
+            vitestProcess.on('close', code => {
+              if (!outputComplete) {
+                clearTimeout(timeout)
+                debugLog('Vitest process exited naturally with code', code)
+
+                if (code === 0 || code === 1) {
+                  // 0 = success, 1 = tests failed but ran successfully
+                  resolve(stdout)
+                } else {
+                  reject(
+                    new Error(`Vitest failed with exit code ${code}. stderr: ${stderr}`)
+                  )
+                }
+              }
+            })
+
+            vitestProcess.on('error', error => {
+              clearTimeout(timeout)
+              reject(new Error(`Failed to start vitest: ${error.message}`))
+            })
+          })
+
+          debugLog('Vitest completed, parsing output...')
+
+          // Parse the JSON output
+          let results: any
+          try {
+            results = JSON.parse(vitestOutput)
+            debugLog(`Found ${results.numTotalTests} total tests`)
+          } catch (error) {
+            debugLog('Failed to parse JSON output', vitestOutput.substring(0, 500))
+            throw new Error(`Failed to parse vitest output as JSON: ${error}`)
           }
-
-          // Count total passed/failed tests
-          results.numPassedTests = results.testResults.reduce(
-            (sum, r) =>
-              sum + r.assertionResults.filter(a => a.status === 'passed').length,
-            0
-          )
-          results.numFailedTests = results.testResults.reduce(
-            (sum, r) =>
-              sum + r.assertionResults.filter(a => a.status === 'failed').length,
-            0
-          )
-
-          // Close vitest
-          await vitest.close()
 
           return {
             content: [

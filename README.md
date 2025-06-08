@@ -157,8 +157,8 @@ npx @madrus/vitest-mcp-server
 
 ## 🏗️ Requirements
 
-- Node.js ≥ 18.0.0
-- Vitest ≥ 2.0.0
+- Node.js ≥ 22.0.0
+- Vitest ≥ 3.0.0
 - A Vitest configuration file in your project
 
 ## 📄 License
