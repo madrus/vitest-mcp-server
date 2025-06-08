@@ -2,8 +2,7 @@
 /* eslint-disable id-blacklist */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
-import { startVitest } from 'vitest/node'
-
+import { spawn } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 
@@ -14,6 +13,22 @@ type UncoveredLine = {
 
 type FileUncoveredLines = {
   [filePath: string]: UncoveredLine[]
+}
+
+// Debug logging function that writes to file to avoid MCP protocol interference
+function debugLog(message: string, data?: any) {
+  if (process.env.DEBUG_MCP !== 'true') return
+
+  const timestamp = new Date().toISOString()
+  const logMessage = data
+    ? `[RUN-VITEST-COVERAGE ${timestamp}] ${message}: ${JSON.stringify(data, null, 2)}\n`
+    : `[RUN-VITEST-COVERAGE ${timestamp}] ${message}\n`
+
+  try {
+    require('fs').appendFileSync('/tmp/vitest-mcp-debug.log', logMessage)
+  } catch (error) {
+    // Silently fail if we can't write to log file
+  }
 }
 
 /**
@@ -220,81 +235,117 @@ export function registerRunVitestCoverageTool(server: McpServer): void {
         debugInfo.push(`Process cwd AFTER chdir: ${process.cwd()}`)
 
         try {
-          console.log(`[DEBUG] Starting Vitest coverage in directory: ${projectDir}`)
-          console.log(`[DEBUG] Current working directory: ${process.cwd()}`)
+          debugLog('Starting Vitest coverage in directory', projectDir)
+          debugLog('Current working directory', process.cwd())
 
-          // Start Vitest programmatically with coverage enabled
-          const vitest = (await Promise.race([
-            startVitest(
-              'test',
-              [],
+          // Run vitest with coverage as child process to get JSON output
+          const vitestOutput = await new Promise<string>((resolve, reject) => {
+            const vitestProcess = spawn(
+              'npx',
+              ['vitest', '--run', '--reporter=json', '--coverage'],
               {
-                // CLI options
-                watch: false,
-                run: true,
-                coverage: {
-                  enabled: true,
-                  reporter: ['json', 'json-summary'],
+                cwd: projectDir,
+                stdio: ['ignore', 'pipe', 'pipe'],
+                env: {
+                  ...process.env,
+                  NODE_ENV: 'test',
+                  // Disable slower features for speed
+                  CI: 'true', // Often makes vitest faster
+                  VITEST_SEGFAULT_RETRY: '0', // Disable retry mechanisms
                 },
-                reporters: ['json'],
-                outputFile: undefined, // we'll read from state
-              },
-              {
-                // Minimal vite config - let vitest.config.ts handle everything
-                root: projectDir,
-                logLevel: 'silent', // Prevent logs from interfering with MCP protocol
               }
-            ),
-            // Add timeout to prevent hanging
-            new Promise<never>((_, reject) =>
-              setTimeout(
-                () =>
-                  reject(new Error('Vitest coverage startup timeout after 30 seconds')),
-                30000
-              )
-            ),
-          ])) as any
+            )
 
-          if (!vitest) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: `Failed to start Vitest with coverage in directory: ${projectDir}. Please ensure vitest.config.ts exists and is properly configured.`,
-                },
-              ],
-            }
-          }
+            let stdout = ''
+            let stderr = ''
+            let outputComplete = false
 
-          console.log(`[DEBUG] Vitest coverage started successfully`)
+            vitestProcess.stdout.on('data', (data: any) => {
+              stdout += data.toString()
+              debugLog('Vitest stdout chunk received', data.toString().length)
 
-          // Wait for tests to complete by using the proper vitest method
-          console.log(`[DEBUG] Waiting for coverage tests to complete...`)
-          ;(await vitest.runningPromise) || Promise.resolve()
-          console.log(`[DEBUG] Coverage tests completed successfully`)
+              // Check if JSON output is complete
+              // Look for key indicators: testResults field and proper JSON ending
+              const hasTestResults = stdout.includes('"testResults":[')
+              const hasProperEnding = stdout.trim().endsWith(']}')
+              const hasValidStructure =
+                stdout.includes('"numTotalTests":') &&
+                stdout.includes('"numPassedTests":')
 
-          // Get test results from vitest state
-          const testFiles = vitest.state.getFiles()
-
-          // Helper function to determine if a file passed
-          const isFilePassed = (file: any) => {
-            const allTasks = file.tasks || []
-            if (allTasks.length === 0) return false
-            return allTasks.every((task: any) => task.result?.state === 'pass')
-          }
-
-          // Helper function to get all test tasks recursively
-          const getAllTasks = (items: any[]): any[] => {
-            const tasks: any[] = []
-            for (const item of items) {
-              if (item.type === 'test') {
-                tasks.push(item)
-              } else if (item.type === 'suite' && item.tasks) {
-                tasks.push(...getAllTasks(item.tasks))
+              // Only consider it complete if we have substantial output and proper structure
+              if (
+                hasTestResults &&
+                hasProperEnding &&
+                hasValidStructure &&
+                !outputComplete
+              ) {
+                outputComplete = true
+                debugLog('Complete JSON output detected, resolving')
+                resolve(stdout)
               }
-            }
-            return tasks
+            })
+
+            vitestProcess.stderr.on('data', (data: any) => {
+              stderr += data.toString()
+              debugLog('Vitest stderr', data.toString())
+            })
+
+            vitestProcess.on('close', (code: any) => {
+              debugLog('Vitest process closed', { code, stdoutLength: stdout.length })
+              if (!outputComplete) {
+                if (code === 0 && stdout.trim()) {
+                  debugLog('Process completed successfully, using final output')
+                  resolve(stdout)
+                } else {
+                  const errorMsg = `Vitest coverage process failed with code ${code}. Stderr: ${stderr}`
+                  debugLog('Process failed', errorMsg)
+                  reject(new Error(errorMsg))
+                }
+              }
+            })
+
+            vitestProcess.on('error', (error: any) => {
+              debugLog('Vitest process error', error.message)
+              reject(new Error(`Failed to spawn vitest: ${error.message}`))
+            })
+
+            // Fallback timeout - allow more time for coverage
+            setTimeout(() => {
+              if (!outputComplete) {
+                debugLog('Vitest timeout reached', {
+                  stdoutLength: stdout.length,
+                  stderrLength: stderr.length,
+                })
+                vitestProcess.kill()
+                reject(
+                  new Error(
+                    `Vitest coverage execution timeout after 60 seconds. Debug: projectDir=${projectDir}, cwd=${process.cwd()}, env.VITEST_PROJECT_DIR=${process.env.VITEST_PROJECT_DIR}, stdout.length=${stdout.length}, stderr.length=${stderr.length}`
+                  )
+                )
+              }
+            }, 60000) // Increased timeout for coverage
+          })
+
+          // Parse the JSON output
+          let results: any
+          try {
+            results = JSON.parse(vitestOutput)
+            debugLog(`Found ${results.numTotalTests} total tests`)
+          } catch (error) {
+            debugLog('Failed to parse JSON output', vitestOutput.substring(0, 500))
+            throw new Error(`Failed to parse vitest output as JSON: ${error}`)
           }
+
+          // Extract test results from the vitest JSON output
+          const testResults = results.testResults || []
+          const numTotalTests = results.numTotalTests || 0
+          const numPassedTests = results.numPassedTests || 0
+          const numFailedTests = results.numFailedTests || 0
+          const numTotalTestSuites = results.numTotalTestSuites || 0
+          const numPassedTestSuites = results.numPassedTestSuites || 0
+          const numFailedTestSuites = results.numFailedTestSuites || 0
+
+          // Wait for coverage files to be generated
 
           // Try multiple times with increasing delays to catch coverage files
           const delays = [100, 500, 1000]
@@ -359,37 +410,15 @@ export function registerRunVitestCoverageTool(server: McpServer): void {
             debugInfo.push('coverage-summary.json does not exist')
           }
 
-          // Collect all test results
-          const testResults = testFiles.map((file: any) => {
-            const allTestTasks = getAllTasks(file.tasks || [])
-            return {
-              name: file.filepath,
-              status: isFilePassed(file) ? 'passed' : 'failed',
-              duration: file.result?.duration || 0,
-              assertionResults: allTestTasks.map((task: any) => ({
-                ancestorTitles: task.suite ? [task.suite.name] : [],
-                title: task.name || 'unknown test',
-                status: task.result?.state === 'pass' ? 'passed' : 'failed',
-                duration: task.result?.duration || 0,
-                failureMessages:
-                  task.result?.errors?.map((err: any) => err.message) || [],
-              })),
-            }
+          // Test results are now taken directly from vitest JSON output
+          debugLog('Test execution completed', {
+            numTotalTests,
+            numPassedTests,
+            numFailedTests,
+            numTotalTestSuites,
+            numPassedTestSuites,
+            numFailedTestSuites,
           })
-
-          // Calculate totals
-          const numTotalTestSuites = testFiles.length
-          const numPassedTestSuites = testFiles.filter(isFilePassed).length
-          const numFailedTestSuites = numTotalTestSuites - numPassedTestSuites
-
-          const allTests = testFiles.flatMap((file: any) =>
-            getAllTasks(file.tasks || [])
-          )
-          const numTotalTests = allTests.length
-          const numPassedTests = allTests.filter(
-            (task: any) => task.result?.state === 'pass'
-          ).length
-          const numFailedTests = numTotalTests - numPassedTests
 
           // Extract uncovered lines if we have detailed coverage data
           let uncoveredLines: FileUncoveredLines = {}
@@ -449,7 +478,7 @@ export function registerRunVitestCoverageTool(server: McpServer): void {
           }
 
           // Close vitest
-          await vitest.close()
+          // Cleanup (no longer needed with spawn approach)
 
           // Return results with coverage information
           return {
