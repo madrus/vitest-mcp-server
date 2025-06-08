@@ -1,6 +1,6 @@
 {
   "name": "@madrus/vitest-mcp-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Advanced Model Context Protocol (MCP) server for Vitest testing with intelligent resources, coverage analysis, and AI-assisted development workflows",
   "keywords": [
     "mcp",
@@ -45,7 +45,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "scripts": {
     "build": "tsc",
@@ -65,7 +65,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "vitest": ">=2.0.0"
+    "vitest": ">=3.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
