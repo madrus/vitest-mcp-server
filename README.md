@@ -1,5 +1,7 @@
 # Vitest MCP Server
 
+![vitest mcp server ad](./assets/vitest-mcp-server.png)
+
 A **production-ready** Model Context Protocol (MCP) server for running Vitest tests and analyzing coverage. This server provides AI assistants with intelligent tools for test-driven development workflows.
 
 ---
@@ -255,10 +257,16 @@ You can override the project directory using:
 
 ## 📈 Recent Improvements
 
+### v1.0.8 (Latest)
+- **📦 Optimized npm package size**: Reduced bundle size by ~60% (46.6kB → 19.2kB)
+- **🧹 Excluded test files from production bundle**: Tests no longer included in published package
+- **⚡ Faster installs**: Significantly reduced download size for `npx` usage
+- **🔧 Fixed .npmignore format**: Corrected file format and added comprehensive exclusions
+
 ### v1.0.6-v1.0.7
 - **📝 Updated documentation (this file)**
 
-### v1.0.5 (Latest)
+### v1.0.5
 - **🔧 Fixed coverage tool execution**: Now properly runs tests AND generates coverage
 - **🔧 Fixed JSON parsing errors**: Resolved malformed JSON output from coverage commands
 - **📊 Enhanced coverage reporting**: Better formatting and status indicators
