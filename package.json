@@ -1,6 +1,6 @@
 {
   "name": "@madrus/vitest-mcp-server",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Advanced Model Context Protocol (MCP) server for Vitest testing with intelligent resources, coverage analysis, and AI-assisted development workflows",
   "keywords": [
     "mcp",
