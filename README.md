@@ -2,6 +2,8 @@
 
 A **production-ready** Model Context Protocol (MCP) server for running Vitest tests and analyzing coverage. This server provides AI assistants with intelligent tools for test-driven development workflows.
 
+---
+
 ## 🚀 Features
 
 - **Health Check Tool** - Server connectivity verification
@@ -12,27 +14,19 @@ A **production-ready** Model Context Protocol (MCP) server for running Vitest te
 - **Auto-Discovery** - Automatically finds your Vitest configuration
 - **Robust Execution** - Fixed JSON parsing and execution reliability (v1.0.5)
 
-## 📦 Installation
-
-```bash
-npm install @madrus/vitest-mcp-server
-```
+---
 
 ## 🛠️ Usage
 
-### As a Standalone MCP Server
+### How it can be useful for local development
 
-```bash
-# Run the server directly
-npx @madrus/vitest-mcp-server
-
-# Or if installed globally
-vitest-mcp-server
-```
+If your project uses Vitest, you can ask your AI agent in Cursor, Claude Desktop, or any other MCP-compatible editor these kinds of questions:
+1. Run my unit tests. Check if there are any errors, and if so, fix them. Repeat this process until all unit tests pass.
+2. Analyze the code coverage and identify the three most important files that have coverage below 80%. Then add the missing unit tests by examining the uncovered lines. Repeat this process until the coverage for these files exceeds 80% and all unit tests pass.
 
 ### Integration with AI Assistants
 
-Configure your AI assistant (like Claude Desktop, Cursor, etc.) to use this MCP server.
+Configure your AI assistant (like Claude Desktop, Cursor, etc.) to use this MCP server in the usual way. On top of that the server needs to know the path to your project root in order to be able to find your Vitest config file.
 
 #### Why This MCP Server Needs Environment Variables
 
@@ -47,8 +41,6 @@ Configure your AI assistant (like Claude Desktop, Cursor, etc.) to use this MCP 
   - Source files for coverage analysis
 - **MCP servers run** in their own process/directory, not your project directory
 - **Without `VITEST_PROJECT_DIR`**, Vitest can't find your config and fails
-
-**Bottom line**: The environment variable tells Vitest where YOUR project lives, since the MCP server process runs elsewhere.
 
 #### Optimized Configuration (Recommended)
 
@@ -66,24 +58,6 @@ For best performance and reliability, use only the environment variable (the `cw
       "env": {
         "VITEST_PROJECT_DIR": "/Users/<your-username>/path/to/your/project/root"
       }
-    }
-  }
-}
-```
-
-#### Basic Configuration (Minimal)
-
-If you want to try without the environment variable (may work in some setups):
-
-```json
-{
-  "mcpServers": {
-    "vitest-runner": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@madrus/vitest-mcp-server@latest"
-      ]
     }
   }
 }
@@ -117,20 +91,6 @@ Here's a complete example for Cursor with multiple MCP servers:
       "env": {
         "VITEST_PROJECT_DIR": "/Users/<your-username>/path/to/your/project/root"
       }
-    },
-    "playwright": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@playwright/mcp@latest"
-      ]
-    },
-    "sequential-thinking": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-sequential-thinking"
-      ]
     }
   }
 }
@@ -143,7 +103,17 @@ Here's a complete example for Cursor with multiple MCP servers:
 3. **Restart required**: After updating your MCP configuration, restart your AI assistant (Cursor, Claude Desktop, etc.)
 4. **Verify setup**: Use the `ping` tool to verify the server is working correctly
 
-#### Troubleshooting MCP Configuration
+#### Testing and Troubleshooting
+
+**Testing with MCP Inspector:**
+
+You can use the MCP Inspector to visually test the server's tools and resources before integrating with your AI assistant:
+
+```bash
+npx @modelcontextprotocol/inspector npx -y @madrus/vitest-mcp-server@latest
+```
+
+This opens a web interface where you can test the `ping`, `run-vitest`, and `run-vitest-coverage` tools interactively and view the available resources.
 
 **Common Issues and Solutions:**
 
@@ -157,34 +127,7 @@ Here's a complete example for Cursor with multiple MCP servers:
    - Check that Vitest is installed in your project: `npm list vitest`
    - Verify the config file is in the directory specified by `VITEST_PROJECT_DIR`
 
-3. **JSON parsing errors (fixed in v1.0.5):**
-   - Update to the latest version: `@madrus/vitest-mcp-server@latest`
-   - Clear any cached versions and restart your AI assistant
-
-4. **Tests don't run but server connects:**
-   - Test manually: `cd /your/project && npx vitest run`
-   - Check that your test files are properly configured in your Vitest config
-   - Ensure test files exist and are discoverable by Vitest
-
-5. **Coverage tool shows 0 tests (fixed in v1.0.5):**
-   - This was a known issue in v1.0.3-1.0.4, update to v1.0.5+
-   - The coverage tool now properly executes tests AND generates coverage
-
-### Programmatic Usage
-
-```typescript
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { registerRunVitestTool, registerRunVitestCoverageTool } from '@madrus/vitest-mcp-server/tools'
-
-const server = new McpServer(
-  { name: 'my-server', version: '1.0.0' },
-  { capabilities: { tools: {}, resources: {} } }
-)
-
-// Register the tools
-registerRunVitestTool(server)
-registerRunVitestCoverageTool(server)
-```
+---
 
 ## 🔧 Available Tools
 
@@ -231,6 +174,8 @@ Executes Vitest tests with comprehensive coverage analysis.
 - Coverage status summaries
 - Branch and function coverage
 
+---
+
 ## 📚 Available Resources
 
 After running tests, the following resources become available:
@@ -243,6 +188,8 @@ Detailed coverage analysis with file-by-file metrics.
 
 ### `vitest://test-summary`
 Human-readable test summary with success percentages.
+
+---
 
 ## 📊 Example Coverage Output
 
@@ -278,6 +225,8 @@ Human-readable test summary with success percentages.
 }
 ```
 
+---
+
 ## 🔧 Configuration
 
 ### Project Detection
@@ -302,13 +251,12 @@ You can override the project directory using:
 | `VITEST_PROJECT_DIR` | **HIGHLY RECOMMENDED**: Specifies your project directory since MCP servers run in isolated processes. Unlike other MCPs that just analyze files, this one executes Vitest commands that need to run in your project root. | No       | Auto-detected |
 | `NODE_ENV`           | Set automatically to `test` during execution. You don't need to set this manually.                                                                                                                                        | No       | `test`        |
 
-**Why `VITEST_PROJECT_DIR` is important:**
-- Most MCP servers just read files or make API calls
-- This MCP server executes `vitest run` which must find your project's config files
-- MCP servers run in their own process, not in your project directory
-- Without this variable, Vitest may fail to find your configuration
+---
 
 ## 📈 Recent Improvements
+
+### v1.0.6-v1.0.7
+- **📝 Updated documentation (this file)**
 
 ### v1.0.5 (Latest)
 - **🔧 Fixed coverage tool execution**: Now properly runs tests AND generates coverage
@@ -324,6 +272,8 @@ You can override the project directory using:
 - Basic test execution and coverage tools
 - Initial MCP server implementation
 
+---
+
 ## 🏗️ Requirements
 
 - Node.js ≥ 22.0.0
@@ -331,17 +281,25 @@ You can override the project directory using:
 - A Vitest configuration file in your project
 - AI assistant with MCP support (Cursor, Claude Desktop, etc.)
 
+---
+
 ## 📄 License
 
 MIT
+
+---
 
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+---
+
 ## 🐛 Issues
 
 If you encounter any issues, please report them on the [GitHub Issues](https://github.com/madrus/vitest-mcp-server/issues) page.
+
+---
 
 ## 🙏 Acknowledgments
 
